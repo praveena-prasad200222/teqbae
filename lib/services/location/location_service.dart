@@ -65,10 +65,21 @@ class GeolocatorLocationService implements LocationService {
     }
 
     try {
+      // 1. Check last known position first for instant response:
+      final Position? lastKnown = await Geolocator.getLastKnownPosition();
+      if (lastKnown != null &&
+          DateTime.now().difference(lastKnown.timestamp).inMinutes < 10) {
+        return GeoPoint(
+          latitude: lastKnown.latitude,
+          longitude: lastKnown.longitude,
+        );
+      }
+
+      // 2. Fast position fix with 4-second timeout using medium accuracy (Wi-Fi/cellular assisted):
       final Position position = await Geolocator.getCurrentPosition(
-        locationSettings: LocationSettings(
-          accuracy: LocationAccuracy.high,
-          timeLimit: const Duration(seconds: 15),
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.medium,
+          timeLimit: Duration(seconds: 4),
         ),
       );
       return GeoPoint(
@@ -76,6 +87,14 @@ class GeolocatorLocationService implements LocationService {
         longitude: position.longitude,
       );
     } catch (_) {
+      // 3. Fallback: If getCurrentPosition timed out, use last known position if available:
+      final Position? fallback = await Geolocator.getLastKnownPosition();
+      if (fallback != null) {
+        return GeoPoint(
+          latitude: fallback.latitude,
+          longitude: fallback.longitude,
+        );
+      }
       throw LocationException(
         LocationFailure.unavailable,
         'GPS location is unavailable right now. Move outdoors or try again.',

@@ -317,9 +317,12 @@ class _LeaveScreenState extends State<LeaveScreen> {
     if (!context.mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(result.message),
+        content: Text(
+          result.message,
+          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+        ),
         backgroundColor:
-            result.success ? null : Theme.of(context).colorScheme.error,
+            result.success ? const Color(0xFF2E7D32) : const Color(0xFFC62828),
       ),
     );
     if (result.success && mounted) {
@@ -344,9 +347,12 @@ class _LeaveScreenState extends State<LeaveScreen> {
     }
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(result.message),
+        content: Text(
+          result.message,
+          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+        ),
         backgroundColor:
-            result.success ? null : Theme.of(context).colorScheme.error,
+            result.success ? const Color(0xFF2E7D32) : const Color(0xFFC62828),
       ),
     );
   }
@@ -364,9 +370,12 @@ class _LeaveScreenState extends State<LeaveScreen> {
     if (result == null || !context.mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(result.message),
+        content: Text(
+          result.message,
+          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+        ),
         backgroundColor:
-            result.success ? null : Theme.of(context).colorScheme.error,
+            result.success ? const Color(0xFF2E7D32) : const Color(0xFFC62828),
       ),
     );
   }
@@ -407,9 +416,12 @@ class _LeaveScreenState extends State<LeaveScreen> {
     if (!context.mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(result.message),
+        content: Text(
+          result.message,
+          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+        ),
         backgroundColor:
-            result.success ? null : Theme.of(context).colorScheme.error,
+            result.success ? const Color(0xFF2E7D32) : const Color(0xFFC62828),
       ),
     );
   }

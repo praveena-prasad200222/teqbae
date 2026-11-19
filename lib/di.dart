@@ -128,7 +128,7 @@ class AppDependencies {
     // the Attendance screen still turns simulation off to test real GPS, and
     // RELEASE never receives a simulation controller at all.
     if (locationServices.simulation != null && officeSettings.isConfigured) {
-      locationServices.simulation!.setSimulationEnabled(true);
+      locationServices.simulation!.setSimulationEnabled(false);
       locationServices.simulation!.useInsideOfficePreset(officeSettings.office);
     }
     final LocationService location = locationServices.location;
