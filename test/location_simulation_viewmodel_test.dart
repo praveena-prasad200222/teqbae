@@ -114,6 +114,14 @@ void main() {
       expect(debug.simulation, isNotNull);
       expect(debug.location, same(debug.simulation));
       expect(debug.simulation!.realGpsEnabled, isTrue);
+
+      final LocationServices releaseEnabled = AppDependencies.createLocationServices(
+        isReleaseMode: true,
+        realService: real,
+        enableSimulationInRelease: true,
+      );
+      expect(releaseEnabled.simulation, isNotNull);
+      expect(releaseEnabled.location, same(releaseEnabled.simulation));
     });
   });
 }

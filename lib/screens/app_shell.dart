@@ -22,6 +22,10 @@ class AppShell extends StatefulWidget {
 
 class _AppShellState extends State<AppShell> {
   int _index = 0;
+  final GlobalKey<DashboardScreenState> _dashboardKey =
+      GlobalKey<DashboardScreenState>();
+  final GlobalKey<AttendanceScreenState> _attendanceKey =
+      GlobalKey<AttendanceScreenState>();
 
   static const List<String> _titles = <String>[
     'Dashboard',
@@ -30,11 +34,11 @@ class _AppShellState extends State<AppShell> {
     'Profile',
   ];
 
-  static const List<Widget> _pages = <Widget>[
-    DashboardScreen(),
-    AttendanceScreen(),
-    LeaveScreen(),
-    ProfileScreen(),
+  late final List<Widget> _pages = <Widget>[
+    DashboardScreen(key: _dashboardKey),
+    AttendanceScreen(key: _attendanceKey),
+    const LeaveScreen(),
+    const ProfileScreen(),
   ];
 
   @override
@@ -207,7 +211,14 @@ class _AppShellState extends State<AppShell> {
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,
-        onDestinationSelected: (int index) => setState(() => _index = index),
+        onDestinationSelected: (int index) {
+          if (index == 0) {
+            _dashboardKey.currentState?.reloadWith2sLoading();
+          } else if (index == 1) {
+            _attendanceKey.currentState?.reloadWith2sLoading();
+          }
+          setState(() => _index = index);
+        },
         destinations: const <NavigationDestination>[
           NavigationDestination(
             icon: Icon(Icons.dashboard_outlined),

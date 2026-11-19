@@ -53,7 +53,7 @@ class OfficeSettingsViewModel extends ChangeNotifier {
     // DEBUG-only convenience: when no real coordinates were supplied, create a
     // local test reference so the reviewer can exercise the unchanged 200 m
     // rule immediately. No coordinate is bundled and RELEASE never does this.
-    if (!kReleaseMode && !AppConfig.isOfficeConfigured) {
+    if (!AppConfig.isOfficeConfigured) {
       await useGeneratedTestPoint();
     }
   }

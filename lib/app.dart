@@ -41,7 +41,7 @@ class RebsApp extends StatelessWidget {
           value: dependencies.attendance),
       ChangeNotifierProvider<LeaveViewModel>.value(value: dependencies.leave),
     ];
-    if (!kReleaseMode && dependencies.locationSimulation != null) {
+    if (dependencies.locationSimulation != null) {
       providers.add(
         ChangeNotifierProvider<LocationSimulationViewModel>.value(
           value: dependencies.locationSimulation!,

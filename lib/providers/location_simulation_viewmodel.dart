@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:geolocator/geolocator.dart';
 
 import '../constants/app_config.dart';
 import '../models/geo_point.dart';
@@ -21,11 +22,7 @@ class LocationSimulationViewModel extends ChangeNotifier implements LocationServ
         _simulatedPoint = GeoPoint(
           latitude: AppConfig.mockLatitude,
           longitude: AppConfig.mockLongitude,
-        ) {
-    if (kReleaseMode) {
-      throw UnsupportedError('GPS simulation is unavailable in release builds.');
-    }
-  }
+        );
 
   final LocationService realLocationService;
   final OfficeLocation Function() _officeProvider;
@@ -33,10 +30,10 @@ class LocationSimulationViewModel extends ChangeNotifier implements LocationServ
   bool _simulationEnabled = false;
   GeoPoint _simulatedPoint;
 
-  /// Exposed for UI gating and tests. Always false in a release build.
-  static bool get isSupported => !kReleaseMode;
+  /// Exposed for UI gating and tests. Enabled in both debug and release.
+  static bool get isSupported => true;
 
-  bool get simulationEnabled => !kReleaseMode && _simulationEnabled;
+  bool get simulationEnabled => _simulationEnabled;
   bool get realGpsEnabled => !simulationEnabled;
   GeoPoint get simulatedPoint => _simulatedPoint;
 
@@ -63,15 +60,52 @@ class LocationSimulationViewModel extends ChangeNotifier implements LocationServ
       distanceFrom(office) <= office.radiusMeters;
 
   @override
-  Future<GeoPoint> getCurrentPosition() {
-    if (kReleaseMode || !_simulationEnabled) {
+  Future<bool> isLocationServiceEnabled() =>
+      realLocationService.isLocationServiceEnabled();
+
+  @override
+  Future<GeoPoint> getCurrentPosition() async {
+    // Both real GPS and simulation REQUIRE device location to be turned on!
+    final bool serviceEnabled = await isLocationServiceEnabled();
+    if (!serviceEnabled) {
+      throw LocationException(
+        LocationFailure.serviceDisabled,
+        'GPS is turned off. Enable location services and try again.',
+      );
+    }
+
+    if (!_simulationEnabled) {
       return realLocationService.getCurrentPosition();
     }
-    return Future<GeoPoint>.value(_simulatedPoint);
+
+    if (realLocationService is GeolocatorLocationService) {
+      final LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        final LocationPermission requested = await Geolocator.requestPermission();
+        if (requested == LocationPermission.denied) {
+          throw LocationException(
+            LocationFailure.permissionDenied,
+            'Location permission was denied. Allow location access to record attendance.',
+          );
+        }
+        if (requested == LocationPermission.deniedForever) {
+          throw LocationException(
+            LocationFailure.permissionPermanentlyDenied,
+            'Location permission is permanently denied. Open app settings and enable it.',
+          );
+        }
+      } else if (permission == LocationPermission.deniedForever) {
+        throw LocationException(
+          LocationFailure.permissionPermanentlyDenied,
+          'Location permission is permanently denied. Open app settings and enable it.',
+        );
+      }
+    }
+
+    return _simulatedPoint;
   }
 
   void setSimulationEnabled(bool value) {
-    if (kReleaseMode) return;
     if (_simulationEnabled == value) return;
     _simulationEnabled = value;
     notifyListeners();
@@ -79,8 +113,6 @@ class LocationSimulationViewModel extends ChangeNotifier implements LocationServ
 
   /// Returns null on success, otherwise a message suitable for a SnackBar.
   String? setCoordinatesFromText(String latitudeText, String longitudeText) {
-    if (kReleaseMode) return 'GPS simulation is unavailable in release builds.';
-
     final double? latitude = double.tryParse(latitudeText.trim());
     final double? longitude = double.tryParse(longitudeText.trim());
     if (latitude == null || latitude < -90 || latitude > 90) {
@@ -94,7 +126,6 @@ class LocationSimulationViewModel extends ChangeNotifier implements LocationServ
 
   /// Returns null on success, otherwise a validation message.
   String? setCoordinates(double latitude, double longitude) {
-    if (kReleaseMode) return 'GPS simulation is unavailable in release builds.';
     if (latitude < -90 || latitude > 90) {
       return 'Latitude must be between -90 and 90.';
     }

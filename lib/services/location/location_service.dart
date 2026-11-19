@@ -22,10 +22,14 @@ class LocationException implements Exception {
 
 abstract class LocationService {
   Future<GeoPoint> getCurrentPosition();
+  Future<bool> isLocationServiceEnabled() async => true;
 }
 
 /// Real device GPS with explicit handling of every failure mode in the brief.
 class GeolocatorLocationService implements LocationService {
+  @override
+  Future<bool> isLocationServiceEnabled() => Geolocator.isLocationServiceEnabled();
+
   @override
   Future<GeoPoint> getCurrentPosition() async {
     final bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
@@ -94,6 +98,9 @@ class MockLocationService implements LocationService {
     this.delay = Duration.zero,
   })  : latitude = latitude ?? AppConfig.mockLatitude,
         longitude = longitude ?? AppConfig.mockLongitude;
+
+  @override
+  Future<bool> isLocationServiceEnabled() async => true;
 
   @override
   Future<GeoPoint> getCurrentPosition() async {

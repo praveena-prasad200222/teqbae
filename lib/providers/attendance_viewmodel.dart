@@ -15,6 +15,7 @@ import '../services/location/location_service.dart';
 import '../utils/attendance_merge.dart';
 import '../utils/company_clock.dart';
 import '../utils/date_formats.dart';
+import '../utils/geofence.dart';
 import 'connectivity_viewmodel.dart';
 import 'location_simulation_viewmodel.dart';
 import 'office_settings_viewmodel.dart';
@@ -131,27 +132,7 @@ class AttendanceViewModel extends ChangeNotifier {
     }
   }
 
-  /// Reads the device position, but in a DEBUG build falls back to the test
-  /// simulation exactly once when the real GPS cannot provide a fix (common
-  /// indoors). RELEASE never constructs the simulation class, so the original
-  /// [LocationException] still reaches the employee there.
-  Future<GeoPoint> _currentPosition() async {
-    try {
-      return await locationService.getCurrentPosition();
-    } on LocationException {
-      final LocationService source = locationService;
-      final OfficeLocation office = effectiveOffice;
-      if (source is LocationSimulationViewModel &&
-          !source.simulationEnabled &&
-          office.isConfigured) {
-        source.setSimulationEnabled(true);
-        source.useInsideOfficePreset(office);
-        notifyListeners();
-        return source.getCurrentPosition();
-      }
-      rethrow;
-    }
-  }
+  Future<GeoPoint> _currentPosition() => locationService.getCurrentPosition();
 
   Future<ActionResult> _record(AttendanceEventType type) async {
     // Guard 1: UI-level repeated-tap protection.
@@ -164,6 +145,22 @@ class AttendanceViewModel extends ChangeNotifier {
     try {
       final GeoPoint position = await _currentPosition();
       final OfficeLocation office = effectiveOffice;
+
+      final bool isSimulated = locationService is LocationSimulationViewModel &&
+          (locationService as LocationSimulationViewModel).simulationEnabled;
+
+      // When GPS simulation is ON, ensure check-in/checkout is strictly allowed only within 200m of Teqbae office:
+      if (isSimulated) {
+        final double distance = GeoFence.distanceMeters(
+          GeoPoint(latitude: office.latitude, longitude: office.longitude),
+          position,
+        );
+        if (distance > office.radiusMeters) {
+          return ActionResult.fail(
+            'GPS Simulation: You are ${distance.round()} m from ${office.name}. Check-in and check-out are only allowed within 200 m of the office.',
+          );
+        }
+      }
 
       // Guard 2: repository serialises writes and re-checks every business rule.
       final AttendanceEvent event = await attendanceRepository.createEvent(
@@ -184,8 +181,11 @@ class AttendanceViewModel extends ChangeNotifier {
       final String savedHint = connectivity.isOnline
           ? ''
           : ' Saved locally; it will sync automatically when you reconnect.';
+      final String simBadge = isSimulated
+          ? ' (GPS Simulation: within 200 m ${office.name} geofence)'
+          : '';
       return ActionResult.ok(
-        '${type.label} recorded at $time.$savedHint',
+        '${type.label} recorded at $time$simBadge.$savedHint',
       );
     } on LocationException catch (error) {
       return ActionResult.fail(error.message);

@@ -16,11 +16,56 @@ import '../widgets/info_tile.dart';
 import '../widgets/section_header.dart';
 import '../widgets/state_views.dart';
 
-class DashboardScreen extends StatelessWidget {
-  const DashboardScreen({super.key});
+class DashboardScreen extends StatefulWidget {
+  final Duration loadingDelay;
+  const DashboardScreen({
+    super.key,
+    this.loadingDelay = const Duration(seconds: 2),
+  });
+
+  @override
+  State<DashboardScreen> createState() => DashboardScreenState();
+}
+
+class DashboardScreenState extends State<DashboardScreen> {
+  bool _isLoading = true;
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _startTimer();
+  }
+
+  void _startTimer() {
+    _isLoading = true;
+    _timer?.cancel();
+    _timer = Timer(widget.loadingDelay, () {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    });
+  }
+
+  void reloadWith2sLoading() {
+    if (mounted) {
+      setState(() => _isLoading = true);
+      _startTimer();
+    }
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
+    if (_isLoading) {
+      return const LoadingView(message: 'Loading your workspace…');
+    }
+
     return Consumer<DashboardViewModel>(
       builder: (BuildContext context, DashboardViewModel vm, _) {
         if (vm.state == ViewState.initial || vm.state == ViewState.loading) {
@@ -38,7 +83,10 @@ class DashboardScreen extends StatelessWidget {
         final AttendanceRecord? today = vm.todayRecord;
 
         return RefreshIndicator(
-          onRefresh: vm.refresh,
+          onRefresh: () async {
+            reloadWith2sLoading();
+            await vm.refresh();
+          },
           child: ListView(
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
             children: <Widget>[

@@ -78,12 +78,13 @@ class AppDependencies {
   /// builds receive a switchable wrapper that still delegates to real GPS by
   /// default.
   static LocationServices createLocationServices({
-    required bool isReleaseMode,
+    bool isReleaseMode = false,
     LocationService? realService,
     OfficeLocation Function()? officeProvider,
+    bool enableSimulationInRelease = false,
   }) {
     final LocationService real = realService ?? GeolocatorLocationService();
-    if (isReleaseMode) {
+    if (isReleaseMode && !enableSimulationInRelease) {
       return LocationServices(location: real, simulation: null);
     }
     final LocationSimulationViewModel simulation =
@@ -116,7 +117,8 @@ class AppDependencies {
     final LeaveRepository leaves =
         LeaveRepository(api: api, storage: storage);
     final LocationServices locationServices = createLocationServices(
-      isReleaseMode: kReleaseMode,
+      isReleaseMode: false,
+      enableSimulationInRelease: true,
       officeProvider: () => officeSettings.office,
     );
     // DEBUG builds start with the simulated point placed inside the office

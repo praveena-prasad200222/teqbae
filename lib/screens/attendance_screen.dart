@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:provider/provider.dart';
 
 import '../constants/app_config.dart';
@@ -19,11 +22,56 @@ import '../widgets/section_header.dart';
 import '../widgets/state_views.dart';
 import '../widgets/sync_feedback.dart';
 
-class AttendanceScreen extends StatelessWidget {
-  const AttendanceScreen({super.key});
+class AttendanceScreen extends StatefulWidget {
+  final Duration loadingDelay;
+  const AttendanceScreen({
+    super.key,
+    this.loadingDelay = const Duration(seconds: 2),
+  });
+
+  @override
+  State<AttendanceScreen> createState() => AttendanceScreenState();
+}
+
+class AttendanceScreenState extends State<AttendanceScreen> {
+  bool _isLoading = true;
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _startTimer();
+  }
+
+  void _startTimer() {
+    _isLoading = true;
+    _timer?.cancel();
+    _timer = Timer(widget.loadingDelay, () {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    });
+  }
+
+  void reloadWith2sLoading() {
+    if (mounted) {
+      setState(() => _isLoading = true);
+      _startTimer();
+    }
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
+    if (_isLoading) {
+      return const LoadingView(message: 'Loading attendance…');
+    }
+
     return Consumer<AttendanceViewModel>(
       builder: (BuildContext context, AttendanceViewModel vm, _) {
         if (vm.state == ViewState.initial || vm.state == ViewState.loading) {
@@ -41,7 +89,10 @@ class AttendanceScreen extends StatelessWidget {
         final CompanyClock clock = vm.clock;
 
         return RefreshIndicator(
-          onRefresh: vm.refresh,
+          onRefresh: () async {
+            reloadWith2sLoading();
+            await vm.refresh();
+          },
           child: ListView(
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
             children: <Widget>[
@@ -169,6 +220,46 @@ class AttendanceScreen extends StatelessWidget {
                   color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
               ),
+              FutureBuilder<bool>(
+                future: Geolocator.isLocationServiceEnabled(),
+                builder: (BuildContext context, AsyncSnapshot<bool> snapshot) {
+                  if (snapshot.hasData && snapshot.data == false) {
+                    return Container(
+                      margin: const EdgeInsets.only(top: 10),
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).colorScheme.errorContainer.withValues(alpha: 0.8),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Row(
+                        children: <Widget>[
+                          Icon(
+                            Icons.location_off_outlined,
+                            size: 18,
+                            color: Theme.of(context).colorScheme.error,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Device location is turned off.',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: Theme.of(context).colorScheme.onErrorContainer,
+                              ),
+                            ),
+                          ),
+                          TextButton(
+                            onPressed: () => Geolocator.openLocationSettings(),
+                            child: const Text('Turn on', style: TextStyle(fontWeight: FontWeight.bold)),
+                          ),
+                        ],
+                      ),
+                    );
+                  }
+                  return const SizedBox.shrink();
+                },
+              ),
               if (LocationSimulationViewModel.isSupported) ...<Widget>[
                 const _OfficeCoordinatesCard(),
                 _buildGpsDebugCard(context, vm),
@@ -230,13 +321,63 @@ class AttendanceScreen extends StatelessWidget {
         ? await vm.checkIn()
         : await vm.checkOut();
     if (!context.mounted) return;
+
+    final bool isLocationDisabled = !result.success &&
+        (result.message.toLowerCase().contains('gps is turned off') ||
+         result.message.toLowerCase().contains('location is turned off') ||
+         result.message.toLowerCase().contains('enable location'));
+
+    final bool isPermissionDenied = !result.success &&
+        result.message.toLowerCase().contains('permission');
+
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(result.message),
         backgroundColor:
             result.success ? null : Theme.of(context).colorScheme.error,
+        action: isLocationDisabled
+            ? SnackBarAction(
+                label: 'Turn on',
+                textColor: Colors.white,
+                onPressed: () => Geolocator.openLocationSettings(),
+              )
+            : isPermissionDenied
+                ? SnackBarAction(
+                    label: 'Settings',
+                    textColor: Colors.white,
+                    onPressed: () => Geolocator.openAppSettings(),
+                  )
+                : null,
       ),
     );
+
+    if (isLocationDisabled && context.mounted) {
+      await showDialog<void>(
+        context: context,
+        builder: (BuildContext dialogContext) => AlertDialog(
+          icon: const Icon(Icons.location_off_outlined, size: 40, color: Colors.orange),
+          title: const Text('Turn on location'),
+          content: const Text(
+            'Device location must be turned on to check in and check out.\n\n'
+            'Please turn on device location services and try again.',
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Cancel'),
+            ),
+            FilledButton.icon(
+              onPressed: () {
+                Navigator.of(dialogContext).pop();
+                Geolocator.openLocationSettings();
+              },
+              icon: const Icon(Icons.location_on_outlined),
+              label: const Text('Turn on location'),
+            ),
+          ],
+        ),
+      );
+    }
   }
 
   Future<void> _resetAttendance(
