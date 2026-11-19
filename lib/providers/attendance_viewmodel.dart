@@ -16,6 +16,7 @@ import '../utils/attendance_merge.dart';
 import '../utils/company_clock.dart';
 import '../utils/date_formats.dart';
 import 'connectivity_viewmodel.dart';
+import 'location_simulation_viewmodel.dart';
 import 'office_settings_viewmodel.dart';
 import 'sync_viewmodel.dart';
 import 'view_state.dart';
@@ -100,6 +101,28 @@ class AttendanceViewModel extends ChangeNotifier {
   Future<ActionResult> checkOut() =>
       _record(AttendanceEventType.checkOut);
 
+  /// Reads the device position, but in a DEBUG build falls back to the test
+  /// simulation exactly once when the real GPS cannot provide a fix (common
+  /// indoors). RELEASE never constructs the simulation class, so the original
+  /// [LocationException] still reaches the employee there.
+  Future<GeoPoint> _currentPosition() async {
+    try {
+      return await locationService.getCurrentPosition();
+    } on LocationException {
+      final LocationService source = locationService;
+      final OfficeLocation office = effectiveOffice;
+      if (source is LocationSimulationViewModel &&
+          !source.simulationEnabled &&
+          office.isConfigured) {
+        source.setSimulationEnabled(true);
+        source.useInsideOfficePreset(office);
+        notifyListeners();
+        return source.getCurrentPosition();
+      }
+      rethrow;
+    }
+  }
+
   Future<ActionResult> _record(AttendanceEventType type) async {
     // Guard 1: UI-level repeated-tap protection.
     if (_isProcessing) {
@@ -109,7 +132,7 @@ class AttendanceViewModel extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final GeoPoint position = await locationService.getCurrentPosition();
+      final GeoPoint position = await _currentPosition();
       final OfficeLocation office = effectiveOffice;
 
       // Guard 2: repository serialises writes and re-checks every business rule.

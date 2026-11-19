@@ -73,12 +73,16 @@ valid office reference and all attendance rules.
 
 For Check In / Check Out without rebuilding, a DEBUG build automatically creates
 a clearly-labelled **“DEBUG generated test point (not Teqbae)”** when no real
-office coordinates were supplied. Simulation starts **ON** with **Inside 200 m**
-selected, so Check In works immediately; **Outside 200 m** still rejects the
-action through the unchanged 200 m rule. No coordinate is bundled in the source —
-the test point is generated on the device and saved locally. You can enter your
-own coordinates under **Attendance → Test office coordinates (DEBUG)**. RELEASE
-never generates a test point and always uses real GPS with real office config.
+office coordinates were supplied. When the app starts and any office reference
+exists (generated, server-provided, or entered on the device), DEBUG starts with
+GPS Simulation **ON** and the simulated point **inside** that reference, so Check
+In works immediately even on an indoor phone with no GPS fix. **Outside 200 m**
+still rejects the action through the unchanged 200 m rule. Turning the switch
+off restores real device GPS. No coordinate is bundled in the source — the test
+point is generated on the device and saved locally. You can enter your own
+coordinates under **Attendance → Test office coordinates (DEBUG)**; saving them
+also places the simulated point inside the new reference. RELEASE never creates a
+simulation controller and always uses real GPS with real office config.
 
 In production, supply the real office through `OFFICE_LAT` / `OFFICE_LNG` or the
 server.
