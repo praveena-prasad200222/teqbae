@@ -10,11 +10,13 @@ class AppConfig {
   // ---------------------------------------------------------------------------
   // API
   // ---------------------------------------------------------------------------
-  /// Android emulator: 10.0.2.2, iOS simulator: localhost,
-  /// physical device: the LAN IP of the machine running the mock server.
+  /// Physical device: the LAN IP of the machine running the mock server.
+  /// Android emulator: override with `http://10.0.2.2:8090`.
+  /// `10.0.2.2` only resolves inside the emulator, which was the cause of the
+  /// "could not reach the server" sync failure on the phone.
   static const String apiBaseUrl = String.fromEnvironment(
     'API_BASE_URL',
-    defaultValue: 'http://10.0.2.2:8090',
+    defaultValue: 'http://10.215.107.104:8090',
   );
 
   /// Sent as `X-Mock-Scenario` on every request; the mock API uses it to

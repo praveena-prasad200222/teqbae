@@ -33,6 +33,18 @@ class ApiSettingsViewModel extends ChangeNotifier {
     final String? saved = await storage.getApiBaseUrl();
     if (saved == null || saved.trim().isEmpty) return;
     if (ApiClient.validateBaseUrl(saved) != null) return;
+
+    const String emulatorOnly = 'http://10.0.2.2:8090';
+    final String compiledDefault =
+        ApiClient.normalizeBaseUrl(AppConfig.apiBaseUrl);
+    // A stale emulator-only override makes every request fail on a physical
+    // phone. When this build targets another host, migrate that setting once.
+    if (ApiClient.normalizeBaseUrl(saved) == emulatorOnly &&
+        compiledDefault != emulatorOnly) {
+      await storage.setApiBaseUrl(compiledDefault);
+      _apply(compiledDefault);
+      return;
+    }
     _apply(saved);
   }
 

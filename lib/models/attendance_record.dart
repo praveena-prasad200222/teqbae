@@ -24,12 +24,15 @@ class AttendanceRecord {
   DateTime? get checkInAt => checkIn?.timestampUtc;
   DateTime? get checkOutAt => checkOut?.timestampUtc;
 
-  Duration? get workingDuration {
+  Duration? workingDurationAt([DateTime? nowUtc]) {
     final DateTime? start = checkInAt;
-    final DateTime? end = checkOutAt;
-    if (start == null || end == null || end.isBefore(start)) return null;
+    if (start == null) return null;
+    final DateTime? end = checkOutAt ?? nowUtc;
+    if (end == null || end.isBefore(start)) return null;
     return end.difference(start);
   }
+
+  Duration? get workingDuration => workingDurationAt();
 
   /// A day is only fully synced when all events present are synced.
   SyncStatus get syncStatus {

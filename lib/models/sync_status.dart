@@ -8,8 +8,19 @@ extension SyncStatusX on SyncStatus {
   String get label => switch (this) {
         SyncStatus.pending => 'Pending Sync',
         SyncStatus.synced => 'Synced',
-        SyncStatus.failed => 'Failed',
+        // The record is safe on this device; only the upload attempt failed.
+        // Keeping the wording non-alarming avoids implying that data was lost.
+        SyncStatus.failed => 'Saved Locally',
         SyncStatus.rejected => 'Rejected',
+      };
+
+  /// Longer explanation used by tooltips and status cards.
+  String get description => switch (this) {
+        SyncStatus.pending => 'Waiting to be uploaded.',
+        SyncStatus.synced => 'Uploaded to the server.',
+        SyncStatus.failed =>
+          'Saved on this device. It will retry automatically when the server is reachable.',
+        SyncStatus.rejected => 'The server refused this record.',
       };
 
   String get jsonValue => name;

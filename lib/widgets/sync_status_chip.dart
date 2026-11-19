@@ -28,9 +28,9 @@ class SyncStatusChip extends StatelessWidget {
           Icons.schedule
         ),
       SyncStatus.failed => (
-          colors.error,
-          colors.error.withValues(alpha: 0.10),
-          Icons.cloud_off_outlined
+          colors.tertiary,
+          colors.tertiary.withValues(alpha: 0.14),
+          Icons.cloud_upload_outlined
         ),
       SyncStatus.rejected => (
           colors.error,
@@ -39,21 +39,24 @@ class SyncStatusChip extends StatelessWidget {
         ),
     };
 
-    return Chip(
-      avatar: Icon(icon, size: 14, color: foreground),
-      label: Text(
-        status.label,
-        style: TextStyle(
-          color: foreground,
-          fontSize: compact ? 10 : 11,
-          fontWeight: FontWeight.w600,
+    return Tooltip(
+      message: status.description,
+      child: Chip(
+        avatar: Icon(icon, size: 14, color: foreground),
+        label: Text(
+          status.label,
+          style: TextStyle(
+            color: foreground,
+            fontSize: compact ? 10 : 11,
+            fontWeight: FontWeight.w600,
+          ),
         ),
+        backgroundColor: background,
+        side: BorderSide.none,
+        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        padding: const EdgeInsets.symmetric(horizontal: 6),
+        visualDensity: VisualDensity.compact,
       ),
-      backgroundColor: background,
-      side: BorderSide.none,
-      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-      padding: const EdgeInsets.symmetric(horizontal: 6),
-      visualDensity: VisualDensity.compact,
     );
   }
 }

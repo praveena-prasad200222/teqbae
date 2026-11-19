@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nested/nested.dart';
 import 'package:provider/provider.dart';
+import 'package:teqbae/models/action_result.dart';
 import 'package:teqbae/models/leave_balance.dart';
 import 'package:teqbae/models/leave_request.dart';
 import 'package:teqbae/models/leave_type.dart';
@@ -166,12 +167,133 @@ void main() {
     );
 
     expect(result.success, isTrue);
+    expect(result.message, startsWith('Leave added successfully!'));
     expect(result.message, contains('Pending Sync'));
     expect(api.submitCalls, 0);
     expect(storage.requests, hasLength(1));
     expect(storage.requests.single.id, startsWith('LRV-LOCAL-'));
     expect(storage.requests.single.syncStatus, SyncStatus.pending);
     expect(vm.pendingSyncCount, 1);
+    expect(vm.balance, const LeaveBalance(casual: 10, sick: 6));
+    expect(storage.balance, const LeaveBalance(casual: 10, sick: 6));
+  });
+
+  test('editing updates the existing request instead of adding a duplicate',
+      () async {
+    await vm.load();
+    await vm.submit(
+      type: LeaveType.casual,
+      startDate: DateTime(2026, 1, 15),
+      endDate: DateTime(2026, 1, 15),
+      reason: 'Family function at home.',
+    );
+    final String id = storage.requests.single.id;
+
+    final result = await vm.updateRequest(
+      requestId: id,
+      type: LeaveType.sick,
+      startDate: DateTime(2026, 1, 20),
+      endDate: DateTime(2026, 1, 21),
+      reason: 'Medical appointment and recovery.',
+    );
+
+    expect(result.success, isTrue);
+    expect(result.message, contains('updated'));
+    expect(storage.requests, hasLength(1));
+    expect(storage.requests.single.id, id);
+    expect(storage.requests.single.type, LeaveType.sick);
+    expect(storage.requests.single.startDate, '2026-01-20');
+    expect(storage.requests.single.endDate, '2026-01-21');
+    expect(storage.requests.single.days, 2);
+    expect(storage.requests.single.syncStatus, SyncStatus.pending);
+    expect(vm.requests, hasLength(1));
+    expect(vm.balance, const LeaveBalance(casual: 12, sick: 4));
+    expect(storage.balance, const LeaveBalance(casual: 12, sick: 4));
+  });
+
+  test('editing validates overlap with other requests', () async {
+    await vm.load();
+    await vm.submit(
+      type: LeaveType.casual,
+      startDate: DateTime(2026, 1, 15),
+      endDate: DateTime(2026, 1, 15),
+      reason: 'Family function at home.',
+    );
+    await vm.submit(
+      type: LeaveType.casual,
+      startDate: DateTime(2026, 1, 17),
+      endDate: DateTime(2026, 1, 17),
+      reason: 'Personal work at home.',
+    );
+    final LeaveRequest second = vm.requests
+        .firstWhere((LeaveRequest r) => r.startDate == '2026-01-17');
+
+    final result = await vm.updateRequest(
+      requestId: second.id,
+      type: LeaveType.casual,
+      startDate: DateTime(2026, 1, 15),
+      endDate: DateTime(2026, 1, 15),
+      reason: 'Family function at home.',
+    );
+
+    expect(result.success, isFalse);
+    expect(result.message, contains('overlap'));
+    expect(storage.requests, hasLength(2));
+    expect(
+      storage.requests
+          .firstWhere((LeaveRequest r) => r.id == second.id)
+          .startDate,
+      '2026-01-17',
+    );
+  });
+
+  test('deleting removes the local request and queues a tombstone', () async {
+    await vm.load();
+    await vm.submit(
+      type: LeaveType.casual,
+      startDate: DateTime(2026, 1, 15),
+      endDate: DateTime(2026, 1, 16),
+      reason: 'Family function at home.',
+    );
+    final String id = storage.requests.single.id;
+
+    final result = await vm.deleteRequest(id);
+
+    expect(result.success, isTrue);
+    expect(result.message, contains('deleted'));
+    expect(storage.requests, isEmpty);
+    expect(vm.requests, isEmpty);
+    expect(storage.leaveDeletionQueue, contains(id));
+    expect(vm.pendingSyncCount, 0);
+  });
+
+  test('offline edit and delete stay local without submitting', () async {
+    await vm.load();
+    connectivity.setOnlineState(false);
+    await vm.submit(
+      type: LeaveType.casual,
+      startDate: DateTime(2026, 1, 15),
+      endDate: DateTime(2026, 1, 15),
+      reason: 'Family function at home.',
+    );
+    final String id = storage.requests.single.id;
+
+    final ActionResult edit = await vm.updateRequest(
+      requestId: id,
+      type: LeaveType.sick,
+      startDate: DateTime(2026, 1, 22),
+      endDate: DateTime(2026, 1, 22),
+      reason: 'Medical appointment at hospital.',
+    );
+    expect(edit.success, isTrue);
+    expect(storage.requests.single.type, LeaveType.sick);
+    expect(storage.requests.single.syncStatus, SyncStatus.pending);
+
+    final ActionResult delete = await vm.deleteRequest(id);
+    expect(delete.success, isTrue);
+    expect(storage.requests, isEmpty);
+    expect(storage.leaveDeletionQueue, contains(id));
+    expect(api.submitCalls, 0);
   });
 
   test('offline submission is saved locally as Pending Sync', () async {

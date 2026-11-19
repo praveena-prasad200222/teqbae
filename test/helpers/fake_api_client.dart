@@ -15,8 +15,10 @@ class FakeApiClient extends ApiClient {
   final Map<String, String> serverIdsByEvent = <String, String>{};
   Object? attendanceError;
   Object? leaveError;
+  Object? leaveDeleteError;
   final List<Map<String, Object?>> submittedLeaveRequests =
       <Map<String, Object?>>[];
+  final List<String> deletedLeaveRequestIds = <String>[];
 
   Employee employee = Employee.fallback();
   LeaveBalance leaveBalance = const LeaveBalance(casual: 12, sick: 6);
@@ -79,4 +81,13 @@ class FakeApiClient extends ApiClient {
       submittedAtUtc: DateTime.utc(2026, 1, 15),
     );
   }
+
+  @override
+  Future<void> deleteLeaveRequest(String requestId) async {
+    if (leaveDeleteError != null) throw leaveDeleteError!;
+    deletedLeaveRequestIds.add(requestId);
+  }
+
+  @override
+  Future<void> approveLeaveRequest(String requestId) async {}
 }

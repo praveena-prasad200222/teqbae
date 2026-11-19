@@ -1,13 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../models/action_result.dart';
 import '../providers/attendance_viewmodel.dart';
 import '../providers/connectivity_viewmodel.dart';
 import '../providers/dashboard_viewmodel.dart';
 import '../providers/leave_viewmodel.dart';
 import '../providers/sync_viewmodel.dart';
 import '../widgets/state_views.dart';
+import '../widgets/sync_feedback.dart';
 import 'attendance_screen.dart';
 import 'dashboard_screen.dart';
 import 'leave_screen.dart';
@@ -48,14 +48,95 @@ class _AppShellState extends State<AppShell> {
     });
   }
 
-  Future<void> _syncNow() async {
-    final ActionResult result = await context.read<SyncViewModel>().syncNow();
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(result.message),
-        backgroundColor: result.success ? null : Theme.of(context).colorScheme.error,
-      ),
+  Future<void> _syncNow() => runSyncWithFeedback(context);
+
+  Future<void> _handleSyncTap(SyncViewModel sync) async {
+    if (sync.pendingCount > 0) {
+      await _showSyncSheet(context, sync);
+    } else {
+      await _syncNow();
+    }
+  }
+
+  Future<void> _showSyncSheet(BuildContext context, SyncViewModel sync) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      builder: (BuildContext sheetContext) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
+                Row(
+                  children: <Widget>[
+                    Icon(
+                      Icons.cloud_sync_outlined,
+                      color: Theme.of(sheetContext).colorScheme.primary,
+                    ),
+                    const SizedBox(width: 10),
+                    Text(
+                      'Synchronization',
+                      style: Theme.of(sheetContext).textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
+                    ),
+                    const Spacer(),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: Theme.of(sheetContext).colorScheme.tertiaryContainer,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Text(
+                        '${sync.pendingCount} pending',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          color: Theme.of(sheetContext)
+                              .colorScheme
+                              .onTertiaryContainer,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  'There are ${sync.pendingCount} record(s) saved locally waiting to sync with the server. '
+                  'If the server is unavailable or you want to reset the pending badge, you can clear the queue.',
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: Theme.of(sheetContext).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: 18),
+                FilledButton.icon(
+                  onPressed: sync.isSyncing
+                      ? null
+                      : () {
+                          Navigator.of(sheetContext).pop();
+                          _syncNow();
+                        },
+                  icon: const Icon(Icons.sync),
+                  label: Text(sync.isSyncing ? 'Syncing…' : 'Sync Now'),
+                ),
+                const SizedBox(height: 8),
+                OutlinedButton.icon(
+                  onPressed: () {
+                    Navigator.of(sheetContext).pop();
+                    runClearPendingWithFeedback(context);
+                  },
+                  icon: const Icon(Icons.cleaning_services_outlined),
+                  label: const Text('Clear / Reset Pending Queue'),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -74,8 +155,10 @@ class _AppShellState extends State<AppShell> {
                 alignment: Alignment.center,
                 children: <Widget>[
                   IconButton(
-                    tooltip: 'Sync Now',
-                    onPressed: sync.isSyncing ? null : _syncNow,
+                    tooltip: sync.pendingCount > 0
+                        ? 'Sync options — ${sync.pendingCount} record(s) waiting'
+                        : 'Sync Now',
+                    onPressed: sync.isSyncing ? null : () => _handleSyncTap(sync),
                     icon: sync.isSyncing
                         ? const SizedBox(
                             width: 18,
@@ -91,7 +174,7 @@ class _AppShellState extends State<AppShell> {
                       child: Container(
                         padding: const EdgeInsets.all(3),
                         decoration: BoxDecoration(
-                          color: Theme.of(context).colorScheme.error,
+                          color: Theme.of(context).colorScheme.tertiary,
                           shape: BoxShape.circle,
                         ),
                         child: Text(

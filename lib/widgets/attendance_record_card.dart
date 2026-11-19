@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models/attendance_record.dart';
 import '../models/attendance_status.dart';
+import '../models/sync_status.dart';
 import '../utils/company_clock.dart';
 import '../utils/date_formats.dart';
 import 'status_chip.dart';
@@ -25,6 +26,12 @@ class AttendanceRecordCard extends StatelessWidget {
       AttendanceStatus.checkedIn => colors.tertiary,
       AttendanceStatus.notCheckedIn => colors.outline,
     };
+    // A retryable upload failure is still a queued sync, and the history must
+    // not expose the internal "Saved Locally" wording. The underlying status
+    // remains failed for the sync engine.
+    final SyncStatus displayStatus = record.syncStatus == SyncStatus.failed
+        ? SyncStatus.pending
+        : record.syncStatus;
 
     return Card(
       margin: const EdgeInsets.only(bottom: 10),
@@ -77,7 +84,7 @@ class AttendanceRecordCard extends StatelessWidget {
             Row(
               mainAxisAlignment: MainAxisAlignment.end,
               children: <Widget>[
-                SyncStatusChip(status: record.syncStatus, compact: true),
+                SyncStatusChip(status: displayStatus, compact: true),
               ],
             ),
           ],

@@ -55,10 +55,11 @@ dart run -DOFFICE_LAT=<TEQBAE_OFFICE_LATITUDE> \
          mock_api/mock_server.dart --port=8090 --scenario=success
 ```
 
-Then run the app. **The default `API_BASE_URL` (`http://10.0.2.2:8090`) works only
-in the Android emulator.** On a physical phone it points to the phone itself,
-which is why dashboard/leave calls time out. You can either pass the correct LAN
-IP as a define, or — more conveniently for a phone — set it in the app:
+Then run the app. The default `API_BASE_URL` is the computer's LAN address
+(`http://10.215.107.104:8090` in this environment), so a phone on the same Wi-Fi
+can sync without extra setup. `http://10.0.2.2:8090` works **only** in the
+Android emulator; if an older build saved that address, startup migrates it to
+the compiled default. You can still pass a LAN IP as a define, or — more conveniently for a phone — set it in the app:
 
 1. Install/run the debug build without any `API_BASE_URL` define.
 2. Open **Profile → API server address**.
@@ -92,13 +93,16 @@ Sync** and returns immediately. Network attempts happen in the background, so a
 broken mock server can never block the form or produce a false success.
 
 The saved URL is persisted locally and applies to every request. **Use compile-time
-default** restores `http://10.0.2.2:8090`. Make sure the phone and computer are on
-the same Wi-Fi and that the mock server is listening on `0.0.0.0` (its default).
+default** restores `http://10.215.107.104:8090` (or the value of `API_BASE_URL`
+used when building). Make sure the phone and computer are on the same Wi-Fi,
+Windows Firewall allows inbound TCP 8090, and the mock server is listening on
+`0.0.0.0` (its default). Sync failures now report the real error instead of a
+false success.
 
 You may still provide the URL at build/run time:
 
 ```bash
-# Android emulator (default API_BASE_URL already points here)
+# Android emulator (pass this override; the compiled default is the LAN IP)
 flutter run \
   --dart-define=OFFICE_LAT=<TEQBAE_OFFICE_LATITUDE> \
   --dart-define=OFFICE_LNG=<TEQBAE_OFFICE_LONGITUDE>
@@ -160,7 +164,7 @@ which is the recommended path for a physical phone.
 
 | Setting | `--dart-define` | Default |
 |---|---|---|
-| API base URL | `API_BASE_URL` | `http://10.0.2.2:8090` (emulator only; override in Profile on a phone) |
+| API base URL | `API_BASE_URL` | `http://10.215.107.104:8090` (computer LAN; use `10.0.2.2` in the emulator or override in Profile) |
 | Mock scenario | `MOCK_SCENARIO` | `success` |
 | Office name | `OFFICE_NAME` | `Teqbae, Kochi` |
 | Office latitude | `OFFICE_LAT` | **required — no coordinate is bundled** |
@@ -274,31 +278,55 @@ balance remains visible offline, and `GET /leave/balance` overwrites them as
 soon as the API responds. Missing/null fields in an API response also fall back
 to the sample values; an explicit `0` is preserved as a real zero balance.
 
+A successful leave submission deducts the selected type's requested calendar
+days immediately from the locally cached balance, so Dashboard and Leave show
+the same value without waiting for the API. The deduction happens once at local
+submission; syncing the request again never deducts twice. Editing refunds the
+old days and deducts the new days, and deleting a Pending request refunds its
+days. A later `GET /leave/balance` merges per type with `min(local, remote)`,
+so a restarted mock server cannot restore already-used days. The three balance
+cards (Casual / Sick / Total) are evenly spaced with a 10 px gap while keeping
+the original colours. The former dashboard backend/sync banner was removed; the
+API integration and Sync button are unchanged.
+
 The leave calendar's `firstDate` is the current company date from
 `CompanyClock`, and the end-date picker starts no earlier than the selected
 start date. Past dates are additionally rejected by `LeaveViewModel.submit`,
 so the calendar restriction is not only a UI rule.
 
-### Leave submission and error messages
+### Leave submission, edit and delete
 
 A leave request is **always saved locally first** with a stable client id
-(`LRV-LOCAL-<uuid>`). It is then submitted to `POST /leave/requests` when online:
+(`LRV-LOCAL-<uuid>`). A successful save shows **“Leave added successfully!”**,
+immediately adds the row to **My leave requests** and leaves it **Pending Sync**
+until the sync engine receives a receipt.
 
-* Success: the local pending copy is replaced by the server receipt and a real
-  success message is shown.
-* Offline while connectivity is offline: the request stays **Pending Sync**.
-  If the API is unreachable during a send attempt, it is marked **Failed** but
-  kept locally for automatic retry. The message says so explicitly; it is never
-  reported as submitted to the server.
-* HTTP 422: the server's actual validation message is displayed and the
-  rejected local copy is kept out of the pending queue.
-* HTTP 5xx / 4xx: the server message is displayed and the request is marked
-  **Failed** locally for automatic retry.
+* Offline: the request stays **Pending Sync** and is sent when connectivity
+  returns.
+* HTTP 422: the server's actual validation message is shown on the request and
+  the local copy is marked **Rejected**.
+* HTTP 5xx / reachability failure: the request is kept locally and shown as
+  **Saved Locally** for automatic retry and is never deleted.
+
+**Edit** and **Delete** are shown on Pending rows (not Approved or Rejected).
+Editing validates the same type/date/reason/balance/overlap rules, keeps the
+original id and submitted time, and replaces the row in place. The edited copy
+becomes **Pending Sync** and the next sync **upserts** the same id, so it cannot
+create a duplicate. Deleting asks for confirmation, removes the row from the
+page and Hive, and queues a tombstone. Tombstones are sent before any create or
+update on the next sync, and are filtered out of remote history so a deleted
+request cannot reappear after refresh or restart. Deleted pending requests are
+therefore never uploaded again.
+
+Old Pending rows from earlier builds are removed once by a Hive migration
+(marker `legacy_pending_leave_cleanup_done`). Approved and Rejected records are
+never touched. The mock server no longer seeds a Pending request, so the cleaned
+history does not come back from `/leave/requests`.
 
 `Connection Lost` is no longer used as a catch-all. A reachability failure names
 the configured `API_BASE_URL` and explains how to correct it. Pending leave
-requests are included in the Sync badge and are sent automatically when
-connectivity returns.
+requests and pending deletions are included in the Sync badge and are processed
+automatically when connectivity returns.
 
 ---
 
@@ -311,9 +339,10 @@ connectivity returns.
 | POST | `/attendance/events` | Submit check-in / check-out event |
 | GET | `/leave/balance` | Leave balance |
 | GET | `/leave/requests` | Leave request history |
-| POST | `/leave/requests` | Submit leave application |
+| POST | `/leave/requests` | Submit leave application (idempotent upsert by client id) |
+| DELETE | `/leave/requests/<id>` | Delete a leave request (idempotent) |
 
-The Flutter app calls these through `package:http` (`ApiClient`); no widget contains hardcoded response data. The server keeps in-memory state, seeds three past attendance days and three leave requests, and repeats geofence / duplicate / leave validation so client and server behaviour can be compared.
+The Flutter app calls these through `package:http` (`ApiClient`); no widget contains hardcoded response data. The server keeps in-memory state, seeds five attendance days and two leave requests (one Approved, one Rejected; **no Pending seed**), and repeats geofence / duplicate / leave validation so client and server behaviour can be compared. `POST /leave/requests` updates an existing record when the same client id is sent again, which is how offline edits sync without duplicates.
 
 ### Sample request and response JSON
 
@@ -430,9 +459,10 @@ Every attendance event is created once with a UUID `eventId` and a monotonic loc
 
 * A retry after a timeout cannot create a second server record for either entity.
 * Pending events are sent in `sequence` order; sync stops at the first network failure so check-out can never overtake check-in.
-* Pending and Failed leave requests are sent oldest-first. A 422 response marks that local request **Rejected** with the real server message; network/server failures mark it **Failed** with an attempt count and error text and keep it for retry.
-* Network/server failures leave records **Pending** with an attempt count and error text. Local records are never deleted by a failed sync.
-* `Sync Now` is available in the app bar, attendance screen and profile. Connectivity return also triggers a silent sync. Background execution while terminated is out of scope (PDF §3).
+* Pending and Failed leave requests are sent oldest-first. A 422 response marks that local request **Rejected** with the real server message; retryable network/server failures keep it locally and show it as **Saved Locally** with an attempt count and error text.
+* Retryable network/server failures never delete local data. Leave history still labels retryable rows **Saved Locally**; attendance history labels them **Pending Sync** and hides the per-record Retry action. Sync failures report the real error/URL detail and return a failure result, so a failed upload is never shown as success.
+* `Sync Now` is available in the app bar cloud icon and the attendance sync card. Attendance history no longer shows per-record **Retry** or the **Saved Locally** badge; retryable failures display **Pending Sync** while the underlying status and automatic retry are preserved. The Dashboard sync banner was removed. Connectivity return also triggers a silent sync. Background execution while terminated is out of scope (PDF §3).
+* Check In / Check Out republishes the Dashboard's cached record list immediately (via `DashboardViewModel.reloadLocal`), so today's times and duration change without an app restart. Manual and automatic syncs also republish the badges on both Dashboard and Attendance.
 
 ### Validations that a production backend MUST repeat
 
@@ -452,13 +482,13 @@ Device checks are UX only. The production server must independently enforce:
 flutter test
 ```
 
-65 tests cover: check-out without check-in, duplicate/repeated check-in, duplicate check-out, successful check-in/check-out, geofence distances and configurable radius, inside/outside 200 m classification, unconfigured-office blocking, stale office reference detection, central Teqbae configuration and configured-office distance checks, runtime device office coordinates and DEBUG auto-generated test point, five-day demo history, company-timezone day keys, leave validation (including past start/end dates, overlap and calendar-day counting), cached-first dashboard loading / API failure / offline / deduplication, latest-five-record selection, sample leave-balance persistence and API overwrite, ViewModel rejection of past dates, local-first leave submission that API errors cannot block, 422 validation messages, 5xx and genuine network error classification, pending leave sync without duplicates, runtime API base URL validation/persistence/reset, development GPS simulation and release wiring, persistence and ordered sync of pending events, Failed-status retention after network failure, conflict → Rejected, idempotent retry after timeout, and widget tests for pending-sync / loading states and the disabled-past-date calendar.
+77 tests cover: check-out without check-in, duplicate/repeated check-in, duplicate check-out, successful check-in/check-out, geofence distances and configurable radius, inside/outside 200 m classification, unconfigured-office blocking, stale office reference detection, central Teqbae configuration and configured-office distance checks, runtime device office coordinates and DEBUG auto-generated test point, five-day demo history, company-timezone day keys, leave validation (including past start/end dates, overlap and calendar-day counting), cached-first dashboard loading / API failure / offline / deduplication, latest-five-record selection, immediate dashboard reload after a local event, sample leave-balance persistence and API overwrite, ViewModel rejection of past dates, local-first leave submission that API errors cannot block, the “Leave added successfully!” message, editing without duplication, edit overlap validation, offline edit/delete, deletion tombstones, deleted requests never uploading, 422 validation messages, 5xx and genuine network error classification, meaningful failure messages for unreachable/offline sync, pending leave sync without duplicates, edited leave upsert with a stable id, runtime API base URL validation/persistence/reset, development GPS simulation and release wiring, persistence and ordered sync of pending events, Saved Locally retention after network failure, conflict → Rejected, idempotent retry after timeout, and widget tests for Pending Sync / Saved Locally / loading states, attendance history hiding Retry and Saved Locally, and the disabled-past-date calendar.
 
 ---
 
 ## 8. Completed features, assumptions and limitations
 
-**Completed:** dashboard (name/ID/department, today's status, times, duration, balance, latest five attendance records visible even offline, loading/empty/error/offline states); bottom navigation (Dashboard, Attendance, Leave, Profile); runtime API base URL setting for physical devices with saved override and retry; runtime DEBUG test office coordinates so Check In / Check Out work without rebuilding; local-first leave submission that cannot be blocked by API failures; GPS check-in/out with permission and geofence handling; DEBUG-only GPS Simulation card on the Attendance screen; offline Hive storage and event queue; automatic + manual sync with Pending/Synced/Failed/Rejected states; leave form with all PDF validations and history; six-endpoint mock HTTP API with six scenarios; Material 3 responsive UI; unit and widget tests.
+**Completed:** dashboard (name/ID/department, today's status, times, duration, balance, latest five attendance records visible even offline, instant refresh after Check In/Check Out, no backend/sync banner, loading/empty/error/offline states); bottom navigation (Dashboard, Attendance, Leave, Profile); runtime API base URL setting for physical devices with saved override and retry; runtime DEBUG test office coordinates so Check In / Check Out work without rebuilding; local-first leave submission with “Leave added successfully!”, in-place edit and confirmed delete for Pending rows; one-time cleanup of legacy Pending leave rows; GPS check-in/out with permission and geofence handling; DEBUG-only GPS Simulation card on the Attendance screen; offline Hive storage and event queue; automatic + manual sync with Pending Sync/Synced/Saved Locally/Rejected states (attendance history shows Pending Sync without per-record Retry), immediate leave balance deduction on both Dashboard and Leave; leave form with all PDF validations and history; mock HTTP API with leave upsert/delete and six scenarios; Material 3 responsive UI; unit and widget tests.
 
 **Assumptions:** one employee, no login; fixed company UTC offset; one session per day; no overnight shifts; all calendar days count as leave; background execution after termination out of scope; mock API data is in-memory and resets when the server restarts.
 

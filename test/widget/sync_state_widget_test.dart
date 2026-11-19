@@ -4,11 +4,14 @@ import 'package:provider/provider.dart';
 
 import 'package:teqbae/models/attendance_event.dart';
 import 'package:teqbae/models/attendance_event_type.dart';
+import 'package:teqbae/models/attendance_record.dart';
 import 'package:teqbae/models/sync_status.dart';
 import 'package:teqbae/providers/connectivity_viewmodel.dart';
 import 'package:teqbae/providers/sync_viewmodel.dart';
 import 'package:teqbae/services/network/connectivity_service.dart';
 import 'package:teqbae/services/sync/sync_engine.dart';
+import 'package:teqbae/utils/company_clock.dart';
+import 'package:teqbae/widgets/attendance_record_card.dart';
 import 'package:teqbae/widgets/state_views.dart';
 import 'package:teqbae/widgets/sync_status_chip.dart';
 
@@ -58,6 +61,51 @@ void main() {
 
     expect(find.text('Pending Sync'), findsOneWidget);
     expect(find.text('1 pending'), findsOneWidget);
+  });
+
+  testWidgets('retryable failure renders Saved Locally instead of Failed',
+      (WidgetTester tester) async {
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(
+          body: SyncStatusChip(status: SyncStatus.failed),
+        ),
+      ),
+    );
+
+    expect(find.text('Saved Locally'), findsOneWidget);
+    expect(find.text('Failed'), findsNothing);
+  });
+
+  testWidgets('attendance history hides Retry and Saved Locally for a failed record',
+      (WidgetTester tester) async {
+    final AttendanceEvent failed = AttendanceEvent.create(
+      type: AttendanceEventType.checkIn,
+      timestampUtc: DateTime.utc(2026, 1, 15, 4),
+      latitude: 10,
+      longitude: 76,
+      dateKey: '2026-01-15',
+      sequence: 1,
+    ).copyWith(syncStatus: SyncStatus.failed);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: AttendanceRecordCard(
+            record: AttendanceRecord(
+              dateKey: '2026-01-15',
+              checkIn: failed,
+              checkOut: null,
+            ),
+            clock: CompanyClock(),
+          ),
+        ),
+      ),
+    );
+
+    expect(find.text('Pending Sync'), findsOneWidget);
+    expect(find.text('Retry'), findsNothing);
+    expect(find.text('Saved Locally'), findsNothing);
   });
 
   testWidgets('loading state renders a progress indicator and message',

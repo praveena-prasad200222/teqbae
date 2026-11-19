@@ -70,6 +70,26 @@ class DashboardViewModel extends ChangeNotifier {
   /// Pull-to-refresh / Retry. Also deduplicated while a refresh is running.
   Future<void> refresh() => _beginRefresh();
 
+  /// Re-reads cached records after a local Check In / Check Out or after a sync
+  /// attempt changed their upload status. This keeps the dashboard in step
+  /// with the Attendance screen without waiting for a restart or a full
+  /// network refresh.
+  Future<void> reloadLocal() async {
+    try {
+      await _reloadCachedRecords();
+      final LeaveBalance? cachedBalance =
+          await leaveRepository.getCachedBalance();
+      if (cachedBalance != null) _balance = cachedBalance;
+      if (_state == ViewState.initial || _state == ViewState.loading) {
+        _state = ViewState.ready;
+      }
+      notifyListeners();
+    } catch (error) {
+      // A cache read must never break the action that triggered it.
+      debugPrint('Dashboard local reload failed: $error');
+    }
+  }
+
   Future<void> _beginRefresh() {
     final Future<void>? pending = _refreshFuture;
     if (pending != null) return pending;

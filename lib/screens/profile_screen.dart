@@ -12,6 +12,7 @@ import '../providers/office_settings_viewmodel.dart';
 import '../providers/sync_viewmodel.dart';
 import '../widgets/info_tile.dart';
 import '../widgets/section_header.dart';
+import '../widgets/sync_feedback.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -181,17 +182,36 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         : sync.lastSuccessfulSync!.toIso8601String(),
                   ),
                   const SizedBox(height: 16),
-                  FilledButton.tonal(
-                    onPressed:
-                        sync.isSyncing ? null : () => _syncNow(context, sync),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: <Widget>[
-                        const Icon(Icons.cloud_sync_outlined, size: 18),
-                        const SizedBox(width: 8),
-                        Text(sync.isSyncing ? 'Syncing…' : 'Sync Now'),
-                      ],
-                    ),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: <Widget>[
+                      FilledButton.tonal(
+                        onPressed: sync.isSyncing
+                            ? null
+                            : () => runSyncWithFeedback(context),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: <Widget>[
+                            const Icon(Icons.cloud_sync_outlined, size: 18),
+                            const SizedBox(width: 8),
+                            Text(sync.isSyncing ? 'Syncing…' : 'Sync Now'),
+                          ],
+                        ),
+                      ),
+                      if (sync.pendingCount > 0)
+                        OutlinedButton(
+                          onPressed: () => runClearPendingWithFeedback(context),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: <Widget>[
+                              Icon(Icons.cleaning_services_outlined, size: 18),
+                              SizedBox(width: 8),
+                              Text('Clear Pending Queue'),
+                            ],
+                          ),
+                        ),
+                    ],
                   ),
                 ],
               ),
@@ -435,14 +455,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  Future<void> _syncNow(BuildContext context, SyncViewModel sync) async {
-    final ActionResult result = await sync.syncNow();
-    if (!context.mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(result.message)),
-    );
-  }
-
   Future<void> _saveApiBaseUrl(
     BuildContext context,
     ApiSettingsViewModel settings,
@@ -476,5 +488,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     await context.read<DashboardViewModel>().refresh();
     if (!context.mounted) return;
     await context.read<SyncViewModel>().syncNow(silent: true);
+    if (!context.mounted) return;
+    await context.read<DashboardViewModel>().reloadLocal();
   }
 }

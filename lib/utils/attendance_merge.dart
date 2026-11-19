@@ -1,3 +1,4 @@
+import '../models/attendance_event.dart';
 import '../models/attendance_record.dart';
 
 /// Merges API history with locally created events.
@@ -15,8 +16,21 @@ class AttendanceMerge {
       merged[record.dateKey] = record;
     }
     for (final AttendanceRecord record in local) {
-      if (record.checkIn != null || record.checkOut != null) {
-        merged[record.dateKey] = record;
+      final AttendanceRecord? existing = merged[record.dateKey];
+      if (existing == null) {
+        if (record.checkIn != null || record.checkOut != null) {
+          merged[record.dateKey] = record;
+        }
+      } else {
+        // Merge checkIn and checkOut so neither is lost.
+        // Local events take precedence over remote events if both exist.
+        final AttendanceEvent? checkIn = record.checkIn ?? existing.checkIn;
+        final AttendanceEvent? checkOut = record.checkOut ?? existing.checkOut;
+        merged[record.dateKey] = AttendanceRecord(
+          dateKey: record.dateKey,
+          checkIn: checkIn,
+          checkOut: checkOut,
+        );
       }
     }
     final List<AttendanceRecord> result = merged.values.toList()

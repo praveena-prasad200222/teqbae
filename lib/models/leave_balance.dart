@@ -10,7 +10,7 @@ class LeaveBalance {
   /// These values are SAMPLE DATA for the preconfigured demo employee, not
   /// actual company leave records. They are overwritten by GET /leave/balance
   /// as soon as the API responds.
-  static const LeaveBalance sample = LeaveBalance(casual: 12, sick: 6);
+  static const LeaveBalance sample = LeaveBalance(casual: 12, sick: 8);
 
   /// Kept only for legacy callers/tests that explicitly need an empty balance.
   static const LeaveBalance empty = LeaveBalance(casual: 0, sick: 0);

@@ -137,6 +137,17 @@ class ApiClient {
     return LeaveRequest.fromJson(body as Map<String, dynamic>);
   }
 
+  /// Deletes a request by its stable client id. The mock server treats an
+  /// unknown id as already deleted, so retries are safe.
+  Future<void> deleteLeaveRequest(String requestId) async {
+    await _delete(ApiEndpoints.leaveRequest(requestId));
+  }
+
+  /// Approves a leave request on the mock server.
+  Future<void> approveLeaveRequest(String requestId) async {
+    await _post('/leave/requests/$requestId/approve', <String, dynamic>{});
+  }
+
   Future<dynamic> _get(
     String path, {
     Map<String, String>? query,
@@ -156,6 +167,11 @@ class ApiClient {
         body: jsonEncode(body),
       ),
     );
+  }
+
+  Future<dynamic> _delete(String path) async {
+    final Uri uri = Uri.parse('$baseUrl$path');
+    return _execute(() => _client.delete(uri, headers: _headers));
   }
 
   Future<dynamic> _execute(Future<http.Response> Function() send) async {

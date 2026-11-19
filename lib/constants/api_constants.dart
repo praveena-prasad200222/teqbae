@@ -6,4 +6,7 @@ class ApiEndpoints {
   static const String attendanceEvents = '/attendance/events';
   static const String leaveBalance = '/leave/balance';
   static const String leaveRequests = '/leave/requests';
+
+  static String leaveRequest(String id) =>
+      '/leave/requests/${Uri.encodeComponent(id)}';
 }

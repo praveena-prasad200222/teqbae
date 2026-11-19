@@ -207,6 +207,64 @@ void main() {
     );
   });
 
+  test('edited leave syncs its latest values with the same id', () async {
+    final LeaveRepository leaves =
+        LeaveRepository(api: api, storage: storage);
+    final pending = await leaves.queue(
+      type: LeaveType.casual,
+      startDate: '2026-01-15',
+      endDate: '2026-01-16',
+      reason: 'Family function at home.',
+      days: 2,
+    );
+    await leaves.updateRequest(
+      requestId: pending.id,
+      type: LeaveType.sick,
+      startDate: '2026-01-20',
+      endDate: '2026-01-21',
+      reason: 'Medical appointment and recovery.',
+      days: 2,
+    );
+
+    final SyncSummary summary = await engine.syncPending();
+
+    expect(summary.synced, 1);
+    expect(api.submittedLeaveRequests, hasLength(1));
+    expect(
+      api.submittedLeaveRequests.single['requestId'],
+      pending.id,
+    );
+    expect(
+      api.submittedLeaveRequests.single['startDate'],
+      '2026-01-20',
+    );
+    expect(storage.requests, hasLength(1));
+    expect(storage.requests.single.id, pending.id);
+    expect(storage.requests.single.type, LeaveType.sick);
+    expect(storage.requests.single.syncStatus, SyncStatus.synced);
+  });
+
+  test('deleted leave is not uploaded and its tombstone is sent', () async {
+    final LeaveRepository leaves =
+        LeaveRepository(api: api, storage: storage);
+    final pending = await leaves.queue(
+      type: LeaveType.casual,
+      startDate: '2026-01-15',
+      endDate: '2026-01-16',
+      reason: 'Family function at home.',
+      days: 2,
+    );
+    await leaves.delete(pending.id);
+
+    final SyncSummary summary = await engine.syncPending();
+
+    expect(api.submittedLeaveRequests, isEmpty);
+    expect(api.deletedLeaveRequestIds, contains(pending.id));
+    expect(storage.requests, isEmpty);
+    expect(storage.leaveDeletionQueue, isEmpty);
+    expect(summary.failed, 0);
+  });
+
   test('422 leave response marks the local request Rejected with the message',
       () async {
     final LeaveRepository leaves =

@@ -1,9 +1,13 @@
 import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:teqbae/models/attendance_event.dart';
+import 'package:teqbae/models/attendance_event_type.dart';
 import 'package:teqbae/models/attendance_record.dart';
+import 'package:teqbae/models/attendance_status.dart';
 import 'package:teqbae/models/employee.dart';
 import 'package:teqbae/models/leave_balance.dart';
+import 'package:teqbae/models/sync_status.dart';
 import 'package:teqbae/providers/connectivity_viewmodel.dart';
 import 'package:teqbae/providers/dashboard_viewmodel.dart';
 import 'package:teqbae/providers/view_state.dart';
@@ -198,6 +202,28 @@ void main() {
       vm.latestRecords.map((AttendanceRecord r) => r.dateKey).toList(),
       <String>['2026-01-16', '2026-01-15', '2026-01-14', '2026-01-13', '2026-01-12'],
     );
+  });
+
+  test('reloadLocal publishes a local check-in without a network refresh',
+      () async {
+    await seedCache();
+    await vm.load();
+    expect(vm.todayRecord?.checkIn, isNull);
+
+    await storage.putEvent(AttendanceEvent.create(
+      type: AttendanceEventType.checkIn,
+      timestampUtc: DateTime.utc(2026, 1, 15, 4, 30),
+      latitude: 10.000000,
+      longitude: 76.000000,
+      dateKey: '2026-01-15',
+      sequence: 1,
+    ));
+
+    await vm.reloadLocal();
+
+    expect(vm.todayRecord?.checkIn, isNotNull);
+    expect(vm.todayRecord?.status, AttendanceStatus.checkedIn);
+    expect(vm.todayRecord?.syncStatus, SyncStatus.pending);
   });
 
   test('concurrent load and refresh share one background future', () async {

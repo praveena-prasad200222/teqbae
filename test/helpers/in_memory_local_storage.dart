@@ -12,6 +12,7 @@ class InMemoryLocalStorage implements LocalStorage {
   Employee? employee;
   LeaveBalance? balance;
   List<LeaveRequest> requests = <LeaveRequest>[];
+  List<String> leaveDeletionQueue = <String>[];
   DateTime? lastSync;
   String? apiBaseUrl;
   ({double latitude, double longitude})? officeCoordinates;
@@ -66,6 +67,14 @@ class InMemoryLocalStorage implements LocalStorage {
   @override
   Future<void> putLeaveRequests(List<LeaveRequest> value) async =>
       requests = List<LeaveRequest>.from(value);
+
+  @override
+  Future<List<String>> getLeaveDeletionQueue() async =>
+      List<String>.from(leaveDeletionQueue);
+
+  @override
+  Future<void> putLeaveDeletionQueue(List<String> ids) async =>
+      leaveDeletionQueue = List<String>.from(ids);
 
   @override
   Future<DateTime?> getLastSuccessfulSync() async => lastSync;

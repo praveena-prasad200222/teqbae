@@ -43,6 +43,10 @@ class DateFormats {
     if (value == null) return '--:--';
     final int hours = value.inHours;
     final int minutes = value.inMinutes.remainder(60);
+    final int seconds = value.inSeconds.remainder(60);
+    if (hours == 0 && minutes == 0 && seconds > 0) {
+      return '${seconds}s';
+    }
     return '${_two(hours)}h ${_two(minutes)}m';
   }
 

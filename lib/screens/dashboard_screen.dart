@@ -88,7 +88,7 @@ class DashboardScreen extends StatelessWidget {
                 },
               ),
               const SizedBox(height: 20),
-              const SectionHeader(title: 'Latest five attendance records'),
+              const SectionHeader(title: 'History'),
               const SizedBox(height: 10),
               if (vm.latestRecords.isEmpty)
                 const EmptyView(
@@ -258,6 +258,7 @@ class _BalanceCard extends StatelessWidget {
                     color: colors.primary,
                   ),
                 ),
+                const SizedBox(width: 10),
                 Expanded(
                   child: _BalanceTile(
                     label: 'Sick',
@@ -265,6 +266,7 @@ class _BalanceCard extends StatelessWidget {
                     color: colors.tertiary,
                   ),
                 ),
+                const SizedBox(width: 10),
                 Expanded(
                   child: _BalanceTile(
                     label: 'Total',

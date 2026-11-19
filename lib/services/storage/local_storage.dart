@@ -33,6 +33,13 @@ abstract class LocalStorage {
 
   Future<void> putLeaveRequests(List<LeaveRequest> requests);
 
+  /// IDs removed locally but not yet acknowledged by the API. Fetching remote
+  /// history must hide these so a deleted request cannot reappear before the
+  /// deletion reaches the server.
+  Future<List<String>> getLeaveDeletionQueue();
+
+  Future<void> putLeaveDeletionQueue(List<String> ids);
+
   Future<DateTime?> getLastSuccessfulSync();
 
   Future<void> setLastSuccessfulSync(DateTime timestamp);

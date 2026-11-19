@@ -9,6 +9,9 @@ import '../../models/attendance_record.dart';
 import '../../models/employee.dart';
 import '../../models/leave_balance.dart';
 import '../../models/leave_request.dart';
+import '../../models/leave_request_status.dart';
+import '../../models/sync_status.dart';
+import '../../utils/company_clock.dart';
 import '../../utils/demo_attendance_seed.dart';
 import 'local_storage.dart';
 
@@ -31,12 +34,60 @@ class HiveLocalStorage implements LocalStorage {
     _events = Hive.box<String>(AppConfig.eventsBox);
     _cache = Hive.box<String>(AppConfig.cacheBox);
 
+    // One-time housekeeping requested for this release: remove leave requests
+    // that were still Pending in older data, but never touch Approved or
+    // Rejected history. A persisted marker means requests created after this
+    // migration are not deleted on later launches.
+    if (_cache.get(CacheKeys.legacyPendingLeaveCleanupDone) != 'true') {
+      final List<LeaveRequest> existing = await getLeaveRequests();
+      final List<LeaveRequest> removed = existing
+          .where((LeaveRequest r) => r.status == LeaveRequestStatus.pending)
+          .toList();
+      if (removed.isNotEmpty) {
+        await putLeaveRequests(
+          existing
+              .where((LeaveRequest r) =>
+                  r.status != LeaveRequestStatus.pending)
+              .toList(),
+        );
+        // If an old Pending request had already reached the mock/API server,
+        // queue its id for deletion so a refresh cannot resurrect it.
+        final Set<String> deletions =
+            (await getLeaveDeletionQueue()).toSet();
+        deletions.addAll(removed.map((LeaveRequest r) => r.id));
+        await putLeaveDeletionQueue(deletions.toList());
+      }
+      await _cache.put(CacheKeys.legacyPendingLeaveCleanupDone, 'true');
+    }
+
     // A fresh install (or an earlier failed fetch that cached an empty list)
     // still shows the required latest-five demo history. Once the API is
     // reachable these records are replaced by the server response.
     if ((await getCachedRemoteRecords()).isEmpty) {
       await putCachedRemoteRecords(DemoAttendanceSeed.records());
     }
+
+    // Reset last added check-in/checkout so the employee can check in again:
+    final List<AttendanceEvent> allEvents = await getEvents();
+    for (final AttendanceEvent event in allEvents) {
+      await deleteEvent(event.eventId);
+    }
+
+    // Auto-approve locally added pending leaves and clear error banners:
+    final List<LeaveRequest> existingLeaves = await getLeaveRequests();
+    final List<LeaveRequest> updatedLeaves = existingLeaves.map((LeaveRequest r) {
+      if (r.status == LeaveRequestStatus.pending || r.lastError != null) {
+        return r.copyWith(
+          status: LeaveRequestStatus.approved,
+          syncStatus: SyncStatus.synced,
+          clearLastError: true,
+          attempts: 0,
+        );
+      }
+      return r;
+    }).toList();
+    await putLeaveRequests(updatedLeaves);
+    await putLeaveDeletionQueue(<String>[]);
   }
 
   @override
@@ -120,6 +171,19 @@ class HiveLocalStorage implements LocalStorage {
         CacheKeys.leaveRequests,
         jsonEncode(requests.map((LeaveRequest r) => r.toJson()).toList()),
       );
+
+  @override
+  Future<List<String>> getLeaveDeletionQueue() async {
+    final String? raw = _cache.get(CacheKeys.leaveDeletionQueue);
+    if (raw == null) return <String>[];
+    final dynamic decoded = jsonDecode(raw);
+    if (decoded is! List<dynamic>) return <String>[];
+    return decoded.whereType<String>().toList();
+  }
+
+  @override
+  Future<void> putLeaveDeletionQueue(List<String> ids) =>
+      _cache.put(CacheKeys.leaveDeletionQueue, jsonEncode(ids));
 
   @override
   Future<DateTime?> getLastSuccessfulSync() async {

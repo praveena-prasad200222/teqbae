@@ -1,6 +1,7 @@
 import '../../models/attendance_event.dart';
 import '../../models/attendance_event_type.dart';
 import '../../models/leave_request.dart';
+import '../../models/leave_request_status.dart';
 import '../../models/sync_status.dart';
 import '../../services/api/api_client.dart';
 import '../../services/api/api_exceptions.dart';
@@ -54,6 +55,8 @@ class SyncEngine {
       rejected += attendance.rejected;
       failed += attendance.failed;
 
+      failed += await _syncLeaveDeletions(errors: errors);
+
       final LeaveOutcome leaves = await _syncLeaves(errors: errors);
       synced += leaves.synced;
       rejected += leaves.rejected;
@@ -73,12 +76,14 @@ class SyncEngine {
               r.syncStatus == SyncStatus.pending ||
               r.syncStatus == SyncStatus.failed)
           .length;
+      final int pendingDeletions =
+          (await storage.getLeaveDeletionQueue()).length;
 
       return SyncSummary(
         synced: synced,
         rejected: rejected,
         failed: failed,
-        pending: pendingEvents + pendingLeaves,
+        pending: pendingEvents + pendingLeaves + pendingDeletions,
         errors: errors,
       );
     } finally {
@@ -140,6 +145,7 @@ class SyncEngine {
           lastError: error.toString(),
         ));
         failed++;
+        errors.add(error.toString());
         // Preserve check-in -> check-out ordering: stop at first failure.
         break;
       }
@@ -148,11 +154,44 @@ class SyncEngine {
     return AttendanceOutcome(synced, rejected, failed);
   }
 
+  /// Sends tombstones before any create/update. A request deleted locally must
+  /// never be re-uploaded just because an older copy still exists in the API.
+  Future<int> _syncLeaveDeletions({required List<String> errors}) async {
+    final List<String> queue = await storage.getLeaveDeletionQueue();
+    if (queue.isEmpty) return 0;
+
+    final List<String> remaining = <String>[];
+    int failed = 0;
+    for (int i = 0; i < queue.length; i++) {
+      final String id = queue[i];
+      try {
+        await api.deleteLeaveRequest(id);
+      } on ApiException catch (error) {
+        if (error.statusCode == 404) continue; // Already gone.
+        remaining.add(id);
+        failed++;
+        errors.add(error.message);
+      } catch (error) {
+        remaining.add(id);
+        remaining.addAll(queue.skip(i + 1));
+        failed++;
+        errors.add(error.toString());
+        break;
+      }
+    }
+    await storage.putLeaveDeletionQueue(remaining);
+    return failed;
+  }
+
   Future<LeaveOutcome> _syncLeaves({required List<String> errors}) async {
+    final Set<String> deleted =
+        (await storage.getLeaveDeletionQueue()).toSet();
     final List<LeaveRequest> pending = (await storage.getLeaveRequests())
         .where((LeaveRequest r) =>
-            r.syncStatus == SyncStatus.pending ||
-            r.syncStatus == SyncStatus.failed)
+            (r.syncStatus == SyncStatus.pending ||
+                r.syncStatus == SyncStatus.failed) &&
+            r.status != LeaveRequestStatus.approved &&
+            !deleted.contains(r.id))
         .toList()
       ..sort((LeaveRequest a, LeaveRequest b) =>
           a.submittedAtUtc.compareTo(b.submittedAtUtc));
@@ -179,7 +218,7 @@ class SyncEngine {
         final LeaveRequest confirmed = receipt.copyWith(
           syncStatus: SyncStatus.synced,
           attempts: 0,
-          lastError: null,
+          clearLastError: true,
         );
         await _replaceLeave(confirmed, removeId: attempt.id);
         synced++;
@@ -193,11 +232,22 @@ class SyncEngine {
         rejected++;
         errors.add(error.message);
       } catch (error) {
+        final List<LeaveRequest> currentCached =
+            await storage.getLeaveRequests();
+        final LeaveRequest? current = currentCached
+            .where((LeaveRequest r) => r.id == attempt.id)
+            .firstOrNull;
+        if (current != null &&
+            (current.status == LeaveRequestStatus.approved ||
+                current.syncStatus == SyncStatus.synced)) {
+          continue;
+        }
         await _replaceLeave(attempt.copyWith(
           syncStatus: SyncStatus.failed,
           lastError: error.toString(),
         ));
         failed++;
+        errors.add(error.toString());
         break;
       }
     }

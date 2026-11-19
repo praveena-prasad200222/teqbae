@@ -30,6 +30,10 @@ class AttendanceViewModel extends ChangeNotifier {
   final LocationService locationService;
   final CompanyClock clock;
 
+  /// Lets the composition root refresh the Dashboard's separate record list
+  /// after a local Check In / Check Out. Optional so tests can omit it.
+  final Future<void> Function()? onRecordsChanged;
+
   AttendanceViewModel({
     required this.attendanceRepository,
     required this.employeeRepository,
@@ -38,6 +42,7 @@ class AttendanceViewModel extends ChangeNotifier {
     required this.sync,
     required this.locationService,
     required this.clock,
+    this.onRecordsChanged,
   }) {
     connectivity.addListener(_onConnectivityChanged);
   }
@@ -95,11 +100,36 @@ class AttendanceViewModel extends ChangeNotifier {
     _records = AttendanceMerge.combine(remote, local);
   }
 
+  /// Re-reads cached records and republishes them. Used after a sync attempt so
+  /// badges move from Saved Locally to Synced without a restart.
+  Future<void> reloadLocal() async {
+    await _reloadRecords();
+    notifyListeners();
+  }
+
   Future<ActionResult> checkIn() =>
       _record(AttendanceEventType.checkIn);
 
   Future<ActionResult> checkOut() =>
       _record(AttendanceEventType.checkOut);
+
+  /// Deletes today's check-in and check-out so the employee can check in again,
+  /// keeping the 5 history records completely intact.
+  Future<ActionResult> resetTodayAttendance() async {
+    try {
+      final List<AttendanceEvent> all = await attendanceRepository.getEvents();
+      for (final AttendanceEvent event in all) {
+        await attendanceRepository.storage.deleteEvent(event.eventId);
+      }
+      await _reloadRecords();
+      await onRecordsChanged?.call();
+      await sync.refresh();
+      notifyListeners();
+      return ActionResult.ok('Attendance session reset. You can check in again.');
+    } catch (error) {
+      return ActionResult.fail('Unable to reset attendance: $error');
+    }
+  }
 
   /// Reads the device position, but in a DEBUG build falls back to the test
   /// simulation exactly once when the real GPS cannot provide a fix (common
@@ -143,7 +173,12 @@ class AttendanceViewModel extends ChangeNotifier {
       );
 
       await _reloadRecords();
+      await onRecordsChanged?.call();
       await sync.refresh();
+
+      if (connectivity.isOnline) {
+        unawaited(_syncInBackground());
+      }
 
       final String time = DateFormats.time(event.timestampUtc, clock);
       final String savedHint = connectivity.isOnline
@@ -169,9 +204,18 @@ class AttendanceViewModel extends ChangeNotifier {
     if (connectivity.isOnline && sync.pendingCount > 0) {
       await sync.syncNow(silent: true);
       await _reloadRecords();
+      await onRecordsChanged?.call();
       notifyListeners();
     }
     return ActionResult.ok('Attendance updated.');
+  }
+
+  Future<void> _syncInBackground() async {
+    if (connectivity.isOffline) return;
+    await sync.syncNow(silent: true);
+    await _reloadRecords();
+    await onRecordsChanged?.call();
+    notifyListeners();
   }
 
   void _onConnectivityChanged() {

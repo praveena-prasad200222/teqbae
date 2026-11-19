@@ -126,6 +126,24 @@ Future<void> _handle(
       return;
     }
 
+    if (method == 'POST' && path.startsWith('/leave/requests/') && path.endsWith('/approve')) {
+      final String id = Uri.decodeComponent(
+        path.substring('/leave/requests/'.length, path.length - '/approve'.length),
+      );
+      final int index = state.leaveRequests
+          .indexWhere((Map<String, dynamic> r) => r['id'] == id);
+      if (index >= 0) {
+        state.leaveRequests[index]['status'] = 'approved';
+        await _sendJson(request.response, 200, state.leaveRequests[index]);
+        return;
+      }
+    }
+
+    if (method == 'DELETE' && path.startsWith('/leave/requests/')) {
+      await _handleLeaveDelete(request, state, path, scenario);
+      return;
+    }
+
     await _sendJson(request.response, 404, <String, dynamic>{
       'message': 'No mock endpoint for $method $path',
     });
@@ -185,25 +203,24 @@ Future<void> _handleAttendanceEvent(
   final String type = (body['type'] as String?) ?? 'check_in';
   final double latitude = (body['latitude'] as num?)?.toDouble() ?? 0;
   final double longitude = (body['longitude'] as num?)?.toDouble() ?? 0;
-  if (!state.config.officeConfigured) {
-    await _sendJson(request.response, 422, <String, dynamic>{
-      'message': 'Teqbae office coordinates are not configured. '
-          '${AppConfig.officeConfigurationHint}',
-    });
-    return;
-  }
-
-  final double distance = _haversine(
-    state.officeLat,
-    state.officeLng,
-    latitude,
-    longitude,
-  );
-  if (distance > state.radius) {
-    await _sendJson(request.response, 422, <String, dynamic>{
-      'message': 'Outside office geofence: ${distance.round()} m from office.',
-    });
-    return;
+  // The app already enforces the 200 m rule with the device-entered reference.
+  // When this demo server was started without OFFICE_LAT/OFFICE_LNG it cannot
+  // know that reference, so it must not reject otherwise-valid events. This
+  // was the second cause of attendance sync failures: every event was answered
+  // with 422 "office coordinates are not configured".
+  if (state.config.officeConfigured) {
+    final double distance = _haversine(
+      state.officeLat,
+      state.officeLng,
+      latitude,
+      longitude,
+    );
+    if (distance > state.radius) {
+      await _sendJson(request.response, 422, <String, dynamic>{
+        'message': 'Outside office geofence: ${distance.round()} m from office.',
+      });
+      return;
+    }
   }
 
   final String dateKey = (body['dateKey'] as String?) ?? '';
@@ -269,6 +286,8 @@ Future<void> _handleLeaveRequest(
   final String type = (body['type'] as String?) ?? 'casual';
   final int days = (body['days'] as num?)?.toInt() ?? 0;
   final String reason = (body['reason'] as String?) ?? '';
+  final String? clientId = (body['id'] as String?) ??
+      (body['requestId'] as String?);
 
   if (reason.replaceAll(RegExp(r'\s'), '').length < 10) {
     await _sendJson(request.response, 422, <String, dynamic>{
@@ -277,7 +296,14 @@ Future<void> _handleLeaveRequest(
     return;
   }
 
+  final int existingIndex = clientId == null || clientId.isEmpty
+      ? -1
+      : state.leaveRequests
+          .indexWhere((Map<String, dynamic> r) => r['id'] == clientId);
+
   final bool overlap = state.leaveRequests.any((Map<String, dynamic> r) {
+    // A retry/update of the same id must not overlap itself.
+    if (clientId != null && r['id'] == clientId) return false;
     if (r['status'] == 'rejected') return false;
     return start.compareTo(r['endDate'] as String) <= 0 &&
         end.compareTo(r['startDate'] as String) >= 0;
@@ -289,31 +315,52 @@ Future<void> _handleLeaveRequest(
     return;
   }
 
-  final int balance = (state.balance[type] as num?)?.toInt() ?? 0;
-  if (days > balance) {
+  final Map<String, dynamic>? existing = existingIndex >= 0
+      ? state.leaveRequests[existingIndex]
+      : null;
+  final int available = ((state.balance[type] as num?)?.toInt() ?? 0) +
+      (existing != null && existing['type'] == type
+          ? ((existing['days'] as num?)?.toInt() ?? 0)
+          : 0);
+  if (days > available) {
     await _sendJson(request.response, 422, <String, dynamic>{
       'message': 'Server validation: requested days exceed the $type balance.',
     });
     return;
   }
 
-  // Idempotency: an offline request keeps its client id. A retry (or a sync
-  // after reconnect) must return the original receipt instead of inserting a
-  // second leave request.
-  final String? clientId = (body['id'] as String?) ??
-      (body['requestId'] as String?);
-  if (clientId != null && clientId.isNotEmpty) {
-    final Map<String, dynamic>? receipt =
-        state.leaveReceiptsById[clientId];
-    if (receipt != null) {
-      await _sendJson(request.response, 200, receipt);
-      return;
+  // A stable client id makes this endpoint an idempotent upsert: an unchanged
+  // retry returns the same record, while an edited request with the same id
+  // updates it in place instead of creating a duplicate.
+  if (existing != null) {
+    final Map<String, dynamic> updated = <String, dynamic>{
+      ...existing,
+      'type': type,
+      'startDate': start,
+      'endDate': end,
+      'reason': reason,
+      'days': days,
+    };
+    _refundBalance(
+      state,
+      existing['type'] as String? ?? 'casual',
+      (existing['days'] as num?)?.toInt() ?? 0,
+    );
+    _deductBalance(state, type, days);
+    state.leaveRequests[existingIndex] = updated;
+    if (clientId != null && clientId.isNotEmpty) {
+      state.leaveReceiptsById[clientId] = updated;
     }
+    await _sendJson(request.response, 200, updated);
+    return;
   }
 
   final String serverId = clientId != null && clientId.isNotEmpty
       ? clientId
       : 'LRV-${state.nextLeaveId++}';
+  final String status = scenario == 'leave_rejected'
+      ? 'rejected'
+      : (scenario == 'leave_pending' ? 'pending' : 'approved');
   final Map<String, dynamic> created = <String, dynamic>{
     'id': serverId,
     'type': type,
@@ -321,14 +368,64 @@ Future<void> _handleLeaveRequest(
     'endDate': end,
     'reason': reason,
     'days': days,
-    'status': 'pending',
+    'status': status,
     'submittedAtUtc': DateTime.now().toUtc().toIso8601String(),
   };
   state.leaveRequests.insert(0, created);
+  _deductBalance(state, type, days);
   if (clientId != null && clientId.isNotEmpty) {
     state.leaveReceiptsById[clientId] = created;
   }
   await _sendJson(request.response, 201, created);
+}
+
+/// Server-side balance is kept in step with accepted leave, so a later
+/// GET /leave/balance never resurrects days already used. The app also deducts
+/// locally, but only once per request; this is the server's own bookkeeping.
+void _deductBalance(_MockState state, String type, int days) {
+  final int current = (state.balance[type] as num?)?.toInt() ?? 0;
+  final int next = current - days;
+  state.balance[type] = next < 0 ? 0 : next;
+}
+
+void _refundBalance(_MockState state, String type, int days) {
+  final int current = (state.balance[type] as num?)?.toInt() ?? 0;
+  state.balance[type] = current + (days < 0 ? 0 : days);
+}
+
+Future<void> _handleLeaveDelete(
+  HttpRequest request,
+  _MockState state,
+  String path,
+  String scenario,
+) async {
+  if (scenario == 'server_error') {
+    await _sendJson(request.response, 500, <String, dynamic>{
+      'message': 'Mock server error (scenario=server_error).',
+    });
+    return;
+  }
+  final String id = Uri.decodeComponent(
+    path.substring('/leave/requests/'.length),
+  );
+  final int index =
+      state.leaveRequests.indexWhere((Map<String, dynamic> r) => r['id'] == id);
+  if (index >= 0) {
+    final Map<String, dynamic> removed = state.leaveRequests[index];
+    _refundBalance(
+      state,
+      removed['type'] as String? ?? 'casual',
+      (removed['days'] as num?)?.toInt() ?? 0,
+    );
+    state.leaveRequests.removeAt(index);
+  }
+  state.leaveReceiptsById.remove(id);
+  // Idempotent: deleting an already-absent request is still success so the
+  // app can clear its tombstone after a retry.
+  await _sendJson(request.response, 200, <String, dynamic>{
+    'id': id,
+    'deleted': true,
+  });
 }
 
 Future<Map<String, dynamic>> _readBody(HttpRequest request) async {
@@ -407,22 +504,13 @@ class _MockState {
 
     final DateTime companyNowLocal = DateTime.now().toUtc()
         .add(Duration(minutes: config.offsetMinutes));
-    final String tomorrow = _key(companyNowLocal.add(const Duration(days: 1)));
     final String nextWeek = _key(companyNowLocal.add(const Duration(days: 7)));
     final String nextWeekPlusTwo =
         _key(companyNowLocal.add(const Duration(days: 9)));
 
+    // No seeded Pending request: older Pending demo rows must stay gone. The
+    // Approved and Rejected examples are retained for history/status testing.
     leaveRequests.addAll(<Map<String, dynamic>>[
-      <String, dynamic>{
-        'id': 'LRV-1001',
-        'type': 'casual',
-        'startDate': tomorrow,
-        'endDate': tomorrow,
-        'reason': 'Family function at home.',
-        'days': 1,
-        'status': 'pending',
-        'submittedAtUtc': DateTime.now().toUtc().toIso8601String(),
-      },
       <String, dynamic>{
         'id': 'LRV-1002',
         'type': 'sick',

@@ -17,6 +17,7 @@ import '../utils/date_formats.dart';
 import '../widgets/attendance_record_card.dart';
 import '../widgets/section_header.dart';
 import '../widgets/state_views.dart';
+import '../widgets/sync_feedback.dart';
 
 class AttendanceScreen extends StatelessWidget {
   const AttendanceScreen({super.key});
@@ -50,11 +51,24 @@ class AttendanceScreen extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: <Widget>[
-                      Text(
-                        "Today's status",
-                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                              fontWeight: FontWeight.w700,
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: <Widget>[
+                          Text(
+                            "Today's status",
+                            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                  fontWeight: FontWeight.w700,
+                                ),
+                          ),
+                          if (status != AttendanceStatus.notCheckedIn)
+                            TextButton.icon(
+                              onPressed: vm.isProcessing
+                                  ? null
+                                  : () => _resetAttendance(context, vm),
+                              icon: const Icon(Icons.restart_alt_outlined, size: 16),
+                              label: const Text('Reset', style: TextStyle(fontSize: 12)),
                             ),
+                        ],
                       ),
                       const SizedBox(height: 6),
                       Text(
@@ -89,7 +103,7 @@ class AttendanceScreen extends StatelessWidget {
                       ),
                       const SizedBox(height: 10),
                       Text(
-                        'Working duration: ${DateFormats.duration(vm.todayRecord?.workingDuration)}',
+                        'Working duration: ${DateFormats.duration(vm.todayRecord?.workingDuration ?? vm.todayRecord?.workingDurationAt(clock.utcNow))}${vm.todayRecord?.checkIn != null && vm.todayRecord?.checkOut == null ? " (in progress)" : ""}',
                         style: const TextStyle(fontSize: 13),
                       ),
                     ],
@@ -128,6 +142,19 @@ class AttendanceScreen extends StatelessWidget {
                   ),
                 ],
               ),
+              if (status == AttendanceStatus.checkedOut) ...<Widget>[
+                const SizedBox(height: 10),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: vm.isProcessing
+                        ? null
+                        : () => _resetAttendance(context, vm),
+                    icon: const Icon(Icons.restart_alt_outlined),
+                    label: const Text('Reset session & check in again'),
+                  ),
+                ),
+              ],
               const SizedBox(height: 8),
               Text(
                 vm.isProcessing
@@ -160,7 +187,10 @@ class AttendanceScreen extends StatelessWidget {
                 )
               else
                 ...vm.records.map(
-                  (record) => AttendanceRecordCard(record: record, clock: clock),
+                  (record) => AttendanceRecordCard(
+                    record: record,
+                    clock: clock,
+                  ),
                 ),
             ],
           ),
@@ -199,6 +229,42 @@ class AttendanceScreen extends StatelessWidget {
     final ActionResult result = type == AttendanceEventType.checkIn
         ? await vm.checkIn()
         : await vm.checkOut();
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(result.message),
+        backgroundColor:
+            result.success ? null : Theme.of(context).colorScheme.error,
+      ),
+    );
+  }
+
+  Future<void> _resetAttendance(
+    BuildContext context,
+    AttendanceViewModel vm,
+  ) async {
+    final bool? confirmed = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext dialogContext) => AlertDialog(
+        title: const Text('Reset today\'s session?'),
+        content: const Text(
+          'This will clear your check-in and check-out so you can check in again. '
+          'Your previous 5 history records will not be changed.',
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Reset'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !context.mounted) return;
+    final ActionResult result = await vm.resetTodayAttendance();
     if (!context.mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -331,7 +397,7 @@ class _TimeTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final ColorScheme colors = Theme.of(context).colorScheme;
     return Container(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
       decoration: BoxDecoration(
         color: colors.surfaceContainerHighest.withValues(alpha: 0.35),
         borderRadius: BorderRadius.circular(12),
@@ -340,16 +406,35 @@ class _TimeTile extends StatelessWidget {
         children: <Widget>[
           Icon(icon, size: 18, color: colors.primary),
           const SizedBox(width: 8),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              Text(label,
-                  style: TextStyle(fontSize: 10, color: colors.onSurfaceVariant)),
-              const SizedBox(height: 2),
-              Text(time,
-                  style: const TextStyle(
-                      fontSize: 16, fontWeight: FontWeight.w700)),
-            ],
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 10,
+                    color: colors.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    time,
+                    maxLines: 1,
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
         ],
       ),
@@ -492,7 +577,8 @@ class _SyncCard extends StatelessWidget {
         final ColorScheme colors = Theme.of(context).colorScheme;
         final String statusText = sync.pendingCount == 0
             ? 'All attendance and leave records are synced.'
-            : '${sync.pendingCount} record(s) waiting to sync.';
+            : '${sync.pendingCount} record(s) are saved on this device and '
+                'waiting to sync.';
         return Card(
           child: Padding(
             padding: const EdgeInsets.all(16),
@@ -501,7 +587,7 @@ class _SyncCard extends StatelessWidget {
                 Icon(
                   sync.pendingCount == 0
                       ? Icons.cloud_done_outlined
-                      : Icons.cloud_queue_outlined,
+                      : Icons.cloud_upload_outlined,
                   color: sync.pendingCount == 0 ? colors.primary : colors.tertiary,
                 ),
                 const SizedBox(width: 12),
@@ -524,7 +610,9 @@ class _SyncCard extends StatelessWidget {
                   ),
                 ),
                 FilledButton.tonal(
-                  onPressed: sync.isSyncing ? null : () => _syncNow(context, sync),
+                  onPressed: sync.isSyncing
+                      ? null
+                      : () => runSyncWithFeedback(context),
                   child: Text(sync.isSyncing ? 'Syncing…' : 'Sync Now'),
                 ),
               ],
@@ -532,18 +620,6 @@ class _SyncCard extends StatelessWidget {
           ),
         );
       },
-    );
-  }
-
-  Future<void> _syncNow(BuildContext context, SyncViewModel sync) async {
-    final ActionResult result = await sync.syncNow();
-    if (!context.mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(result.message),
-        backgroundColor:
-            result.success ? null : Theme.of(context).colorScheme.error,
-      ),
     );
   }
 }

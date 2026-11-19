@@ -144,6 +144,13 @@ class AppDependencies {
     );
     await sync.init();
 
+    final DashboardViewModel dashboard = DashboardViewModel(
+      employeeRepository: employees,
+      attendanceRepository: attendanceRepo,
+      leaveRepository: leaves,
+      connectivity: connectivity,
+      clock: clock,
+    );
     return AppDependencies(
       clock: clock,
       storage: storage,
@@ -159,13 +166,7 @@ class AppDependencies {
       syncEngine: engine,
       connectivity: connectivity,
       sync: sync,
-      dashboard: DashboardViewModel(
-        employeeRepository: employees,
-        attendanceRepository: attendanceRepo,
-        leaveRepository: leaves,
-        connectivity: connectivity,
-        clock: clock,
-      ),
+      dashboard: dashboard,
       attendance: AttendanceViewModel(
         attendanceRepository: attendanceRepo,
         employeeRepository: employees,
@@ -174,12 +175,18 @@ class AppDependencies {
         sync: sync,
         locationService: location,
         clock: clock,
+        // The Dashboard keeps its own published record list. Refresh it as soon
+        // as an event is written so Check In / Check Out is visible without
+        // restarting the app.
+        onRecordsChanged: dashboard.reloadLocal,
       ),
       leave: LeaveViewModel(
         repository: leaves,
         connectivity: connectivity,
         clock: clock,
         sync: sync,
+        // Keep the Dashboard's balance card in step with Leave immediately.
+        onBalanceChanged: dashboard.reloadLocal,
       ),
     );
   }

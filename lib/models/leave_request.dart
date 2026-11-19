@@ -96,23 +96,29 @@ class LeaveRequest {
       };
 
   LeaveRequest copyWith({
+    LeaveType? type,
+    String? startDate,
+    String? endDate,
+    String? reason,
+    int? days,
     LeaveRequestStatus? status,
     SyncStatus? syncStatus,
     int? attempts,
     String? lastError,
+    bool clearLastError = false,
   }) {
     return LeaveRequest(
       id: id,
-      type: type,
-      startDate: startDate,
-      endDate: endDate,
-      reason: reason,
-      days: days,
+      type: type ?? this.type,
+      startDate: startDate ?? this.startDate,
+      endDate: endDate ?? this.endDate,
+      reason: reason ?? this.reason,
+      days: days ?? this.days,
       status: status ?? this.status,
       submittedAtUtc: submittedAtUtc,
       syncStatus: syncStatus ?? this.syncStatus,
       attempts: attempts ?? this.attempts,
-      lastError: lastError,
+      lastError: clearLastError ? null : (lastError ?? this.lastError),
     );
   }
 }
